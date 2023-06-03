@@ -10,7 +10,7 @@ import {DynamoDBClient} from '@aws-sdk/client-dynamodb';
 import {TransactionType} from "./transaction-type";
 import BalanceEntity from './balance-entity';
 
-const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
+const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 export const find: Handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const userId = event.queryStringParameters ? event.queryStringParameters['userId'] : undefined;
