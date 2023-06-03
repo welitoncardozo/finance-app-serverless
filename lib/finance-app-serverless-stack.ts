@@ -3,8 +3,9 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import {Code, Runtime} from 'aws-cdk-lib/aws-lambda';
 import {LambdaIntegration, RestApi} from 'aws-cdk-lib/aws-apigateway';
 import * as cdk from 'aws-cdk-lib';
-import {AttributeType, Table} from "aws-cdk-lib/aws-dynamodb";
-import {RemovalPolicy} from "aws-cdk-lib";
+import {RemovalPolicy} from 'aws-cdk-lib';
+import {AttributeType, StreamViewType, Table} from 'aws-cdk-lib/aws-dynamodb';
+import {DynamoEventSource} from 'aws-cdk-lib/aws-lambda-event-sources';
 
 export class FinanceAppServerlessStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
@@ -15,7 +16,9 @@ export class FinanceAppServerlessStack extends cdk.Stack {
       description: 'This service of the finances'
     });
 
-    const user = api.root.addResource('user');
+    /**
+     * USER
+     */
     const userHandlerFn = new lambda.Function(this, 'user-handler', {
       runtime: Runtime.NODEJS_18_X,
       code: Code.fromAsset('services/user'),
@@ -30,26 +33,40 @@ export class FinanceAppServerlessStack extends cdk.Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
     userTable.grantWriteData(userHandlerFn);
-    user.addMethod('POST', new LambdaIntegration(userHandlerFn));
 
-    const transaction = api.root.addResource('transaction');
-    const transactionHandlerFn = new lambda.Function(this, 'transaction-handler', {
-      runtime: Runtime.NODEJS_18_X,
-      code: Code.fromAsset('services/transaction'),
-      handler: 'transaction-lambda.handler',
-    });
+    const userResource = api.root.addResource('user');
+    userResource.addMethod('POST', new LambdaIntegration(userHandlerFn));
+
+    /**
+     * TRANSACTION
+     */
     const transactionTable = new Table(this, 'transaction-table', {
       partitionKey: {
         name: 'id',
         type: AttributeType.STRING,
       },
       tableName: 'transaction',
+      stream: StreamViewType.NEW_IMAGE,
       removalPolicy: RemovalPolicy.DESTROY,
     });
+    const transactionHandlerFn = new lambda.Function(this, 'transaction-handler', {
+      runtime: Runtime.NODEJS_18_X,
+      code: Code.fromAsset('services/transaction'),
+      handler: 'transaction-lambda.handler',
+    });
     transactionTable.grantWriteData(transactionHandlerFn);
-    transaction.addMethod('POST', new LambdaIntegration(transactionHandlerFn));
 
-    const balance = api.root.addResource('balance');
+    const transactionTableEventSource = new DynamoEventSource(transactionTable, {
+      startingPosition: lambda.StartingPosition.TRIM_HORIZON,
+      retryAttempts: 1,
+    });
+
+    const transactionResource = api.root.addResource('transaction');
+    transactionResource.addMethod('POST', new LambdaIntegration(transactionHandlerFn));
+
+    /**
+     * BALANCE
+     */
     const balanceTable = new Table(this, 'balance-table', {
       partitionKey: {
         name: 'userId',
@@ -59,16 +76,13 @@ export class FinanceAppServerlessStack extends cdk.Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
-    // TODO update by event
     const balanceUpdateFn = new lambda.Function(this, 'balance-update', {
       runtime: Runtime.NODEJS_18_X,
       code: Code.fromAsset('services/balance'),
       handler: 'balance-lambda.update',
-      environment: {
-        TABLE_NAME: balanceTable.tableName,
-      },
     });
-    balanceTable.grantWriteData(balanceUpdateFn);
+    balanceTable.grantReadWriteData(balanceUpdateFn);
+    balanceUpdateFn.addEventSource(transactionTableEventSource);
 
     const balanceFindFn = new lambda.Function(this, 'balance-find', {
       runtime: Runtime.NODEJS_18_X,
@@ -77,7 +91,7 @@ export class FinanceAppServerlessStack extends cdk.Stack {
     });
     balanceTable.grantReadData(balanceFindFn);
 
-    balance.addMethod('POST', new LambdaIntegration(balanceUpdateFn));
-    balance.addMethod('GET', new LambdaIntegration(balanceFindFn));
+    const balanceResource = api.root.addResource('balance');
+    balanceResource.addMethod('GET', new LambdaIntegration(balanceFindFn));
   }
 }

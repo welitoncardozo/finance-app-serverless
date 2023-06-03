@@ -3,6 +3,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import crypto from 'crypto';
 import TransactionEntity from "./transaction-entity";
+import {TransactionType} from "./transaction-type";
 
 const handler: Handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const { body } = event;
@@ -17,6 +18,17 @@ const handler: Handler = async (event: APIGatewayProxyEvent): Promise<APIGateway
   const transaction: TransactionEntity = {
     id: crypto.randomUUID(),
     ...transactionData
+  };
+
+  const isTransactionInvalid = !transaction.userId
+    || !transaction.value
+    || !transaction.type
+    || ![TransactionType.EXPENSE, TransactionType.REVENUE].includes(transaction.type);
+  if (isTransactionInvalid) {
+    return {
+      statusCode: 500,
+      body: 'Transaction is invalid'
+    };
   }
 
   try {
